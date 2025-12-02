@@ -109,6 +109,21 @@ Use Kafka to stream transactions through the saved pipeline and generate alerts.
      -e "SELECT * FROM FraudAlerts LIMIT 5;"
    ```
 
+### Stage 5: Hybrid report
+
+Produce an on-demand report that blends SQL rule hits with ML probabilities:
+
+```bash
+python -m src.hybrid --limit 20
+```
+
+The command fetches suspicious transactions directly from Ignite using the SQL
+rules (high amount or zero-balance transfers/cash-outs), scores them with the
+saved sklearn pipeline (`artifacts/model.joblib`), and prints a ranked table.
+Rows hitting any SQL rule are boosted to a minimum `final_risk` of 0.95, while
+purely ML-driven scores use the predicted fraud probability. Re-run after new
+training or data loads to see updated risk ordering.
+
 ## Verification
 
 ### Kafka
