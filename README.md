@@ -4,6 +4,8 @@ Stage 1 brings up local infrastructure for Apache Ignite and Kafka with a minima
 
 Stage 2 adds a lightweight Python client for loading and querying the Ignite Transactions table.
 
+Stage 3 trains a reusable sklearn pipeline from Ignite data and scores recent transactions.
+
 ## Prerequisites
 - Docker
 - Docker Compose
@@ -55,6 +57,20 @@ Example CLI entry points:
   ```bash
   python -c "from src.ignite_client import fetch_transactions; print(fetch_transactions(1))"
   ```
+
+### Stage 3: Train & Score
+
+Train a fraud model (requires Ignite to contain labeled transactions):
+
+```bash
+python -m src.train --max-rows 50000 --test-size 0.2 --random-state 42
+```
+
+Score recent transactions with the saved pipeline:
+
+```bash
+python -m src.score --limit 10
+```
 
 ## Verification
 
