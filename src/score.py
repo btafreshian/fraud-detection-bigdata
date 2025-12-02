@@ -1,4 +1,4 @@
-"""Score transactions using a trained fraud detection pipeline."""
+"""Score recent transactions from Ignite using the trained model."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import List
 import joblib
 import pandas as pd
 
+from .cli_utils import error_exit, info
 from .ignite_client import fetch_recent_transactions
 from .preprocess import FEATURE_COLS
 
@@ -17,7 +18,7 @@ MODEL_PATH = Path("artifacts/model.joblib")
 
 def load_model(model_path: Path = MODEL_PATH):
     if not model_path.exists():
-        raise FileNotFoundError(
+        error_exit(
             f"Model not found at {model_path}. Train one with `python -m src.train`."
         )
     return joblib.load(model_path)
@@ -55,15 +56,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    try:
-        model = load_model(args.model_path)
-    except FileNotFoundError as exc:
-        print(exc)
-        return
+    model = load_model(args.model_path)
 
-    rows = fetch_recent_transactions(limit=args.limit)
+    try:
+        rows = fetch_recent_transactions(limit=args.limit)
+    except ConnectionError:
+        error_exit("Unable to reach Apache Ignite. Start the docker compose stack with `make up`.")
     if not rows:
-        print(
+        info(
             "No transactions available in Ignite to score. Load data with src.load_csv_to_ignite first."
         )
         return

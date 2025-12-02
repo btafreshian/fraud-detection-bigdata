@@ -10,6 +10,9 @@ from typing import Dict, Iterable, Iterator, Optional
 
 import pandas as pd
 
+from kafka.errors import KafkaError, NoBrokersAvailable
+
+from .cli_utils import error_exit, format_exception, info
 from . import schema
 from .kafka_common import TRANSACTIONS_TOPIC, build_producer, get_bootstrap_server
 
@@ -60,6 +63,8 @@ def synthetic_transactions(limit: int) -> Iterator[Dict[str, object]]:
 
 
 def csv_transactions(path: Path, limit: Optional[int]) -> Iterator[Dict[str, object]]:
+    if not path.exists():
+        error_exit(f"CSV source not found at {path}.")
     df = pd.read_csv(path)
     if limit:
         df = df.head(limit)
@@ -100,9 +105,9 @@ def parse_args() -> argparse.Namespace:
 
 def validate_source(args: argparse.Namespace) -> None:
     if args.csv and args.synthetic:
-        raise SystemExit("Specify either --csv or --synthetic, not both.")
+        error_exit("Specify either --csv or --synthetic, not both.")
     if not args.csv and not args.synthetic:
-        print("No CSV provided; defaulting to synthetic transaction generation.")
+        info("No CSV provided; defaulting to synthetic transaction generation.")
 
 
 def iter_transactions(args: argparse.Namespace) -> Iterable[Dict[str, object]]:
@@ -116,8 +121,16 @@ def main() -> None:
     validate_source(args)
 
     bootstrap_server = get_bootstrap_server(args.bootstrap)
-    producer = build_producer(bootstrap_server)
-    print(f"Kafka producer connected to {bootstrap_server}; publishing to {TRANSACTIONS_TOPIC}.")
+    try:
+        producer = build_producer(bootstrap_server)
+    except (KafkaError, NoBrokersAvailable) as exc:  # pragma: no cover - network
+        error_exit(
+            f"Unable to connect to Kafka at {bootstrap_server}. "
+            "Start the docker compose stack first."
+        )
+    info(
+        f"Kafka producer connected to {bootstrap_server}; publishing to {TRANSACTIONS_TOPIC}."
+    )
 
     sleep_seconds = args.sleep_ms / 1000.0 if args.sleep_ms else 0.0
     count = 0
@@ -131,10 +144,14 @@ def main() -> None:
             if sleep_seconds:
                 time.sleep(sleep_seconds)
         producer.flush()
+    except (KafkaError, NoBrokersAvailable) as exc:  # pragma: no cover - network
+        error_exit(
+            f"Kafka publish failed after {count} messages: {format_exception(exc)}"
+        )
     finally:
         producer.close()
 
-    print(f"Published {count} transactions to topic '{TRANSACTIONS_TOPIC}'.")
+    info(f"Published {count} transactions to topic '{TRANSACTIONS_TOPIC}'.")
 
 
 if __name__ == "__main__":
