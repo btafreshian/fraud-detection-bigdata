@@ -72,6 +72,43 @@ Score recent transactions with the saved pipeline:
 python -m src.score --limit 10
 ```
 
+### Stage 4: Streaming demo
+
+Use Kafka to stream transactions through the saved pipeline and generate alerts.
+
+1. Start (or ensure) the Docker stack is running:
+   ```bash
+   docker compose up -d
+   ```
+
+2. Train the model if `artifacts/model.joblib` is missing:
+   ```bash
+   python -m src.train
+   ```
+
+3. Start the consumer (loads the saved pipeline, writes to Ignite, emits alerts):
+   ```bash
+   python -m src.consume --threshold 0.7
+   ```
+
+4. In another terminal, publish transactions (synthetic generator is the default fallback):
+   ```bash
+   python -m src.produce --synthetic --limit 200 --sleep-ms 25
+   ```
+
+5. (Optional) Watch alerts directly from Kafka inside the container:
+   ```bash
+   docker compose exec kafka /opt/bitnami/kafka/bin/kafka-console-consumer.sh \
+     --bootstrap-server localhost:9092 --topic fraud_alerts --from-beginning
+   ```
+
+6. Verify alerts landed in Ignite (via SQL shell):
+   ```bash
+   docker compose exec -it ignite-node /opt/ignite/apache-ignite/bin/sqlline.sh \
+     -u jdbc:ignite:thin://127.0.0.1:10800 \
+     -e "SELECT * FROM FraudAlerts LIMIT 5;"
+   ```
+
 ## Verification
 
 ### Kafka

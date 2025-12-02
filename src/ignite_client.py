@@ -9,6 +9,8 @@ from pyignite import Client
 
 from .config import (
     DEFAULT_FETCH_LIMIT,
+    FRAUD_ALERTS_TABLE,
+    FRAUD_ALERT_COLUMNS,
     IGNITE_HOST,
     IGNITE_PORT,
     TRANSACTION_COLUMNS,
@@ -26,6 +28,14 @@ INSERT_SQL = (
 SELECT_BASE_SQL = f"SELECT {', '.join(TRANSACTION_COLUMNS)} FROM {TRANSACTIONS_TABLE}"
 SELECT_BY_ID_SQL = (
     f"SELECT {', '.join(TRANSACTION_COLUMNS)} FROM {TRANSACTIONS_TABLE} WHERE tx_id = ?"
+)
+
+INSERT_ALERT_SQL = (
+    f"INSERT INTO {FRAUD_ALERTS_TABLE} ("
+    + ", ".join(FRAUD_ALERT_COLUMNS)
+    + ") VALUES ("
+    + ", ".join(["?"] * len(FRAUD_ALERT_COLUMNS))
+    + ")"
 )
 
 
@@ -58,6 +68,13 @@ def insert_transactions(rows: Iterable[Dict[str, Any]]) -> List[str]:
             client.sql(INSERT_SQL, query_args=[row[col] for col in TRANSACTION_COLUMNS])
             inserted.append(str(row.get("tx_id")))
     return inserted
+
+
+def insert_alert(alert_row: Dict[str, Any]) -> str:
+    alert_id = alert_row.get("alert_id")
+    with get_client() as client:
+        client.sql(INSERT_ALERT_SQL, query_args=[alert_row[col] for col in FRAUD_ALERT_COLUMNS])
+    return str(alert_id)
 
 
 def _fetch_rows(limit: int | None, order_by: str | None = None) -> List[Dict[str, Any]]:
