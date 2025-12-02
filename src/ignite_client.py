@@ -9,6 +9,8 @@ from pyignite import Client
 
 from .config import (
     DEFAULT_FETCH_LIMIT,
+    FRAUD_ALERTS_TABLE,
+    FRAUD_ALERT_COLUMNS,
     IGNITE_HOST,
     IGNITE_PORT,
     TRANSACTION_COLUMNS,
@@ -23,9 +25,17 @@ INSERT_SQL = (
     + ")"
 )
 
-SELECT_SQL = f"SELECT {', '.join(TRANSACTION_COLUMNS)} FROM {TRANSACTIONS_TABLE} LIMIT ?"
+SELECT_BASE_SQL = f"SELECT {', '.join(TRANSACTION_COLUMNS)} FROM {TRANSACTIONS_TABLE}"
 SELECT_BY_ID_SQL = (
     f"SELECT {', '.join(TRANSACTION_COLUMNS)} FROM {TRANSACTIONS_TABLE} WHERE tx_id = ?"
+)
+
+ALERT_INSERT_SQL = (
+    f"INSERT INTO {FRAUD_ALERTS_TABLE} ("
+    + ", ".join(FRAUD_ALERT_COLUMNS)
+    + ") VALUES ("
+    + ", ".join(["?"] * len(FRAUD_ALERT_COLUMNS))
+    + ")"
 )
 
 
@@ -60,10 +70,32 @@ def insert_transactions(rows: Iterable[Dict[str, Any]]) -> List[str]:
     return inserted
 
 
-def fetch_transactions(limit: int = DEFAULT_FETCH_LIMIT) -> List[Dict[str, Any]]:
+def _fetch_rows(limit: int | None, order_by: str | None = None) -> List[Dict[str, Any]]:
+    query = SELECT_BASE_SQL
+    if order_by:
+        query += f" ORDER BY {order_by}"
+    args: list[Any] = []
+    if limit is not None:
+        query += " LIMIT ?"
+        args.append(limit)
+
     with get_client() as client:
-        result = client.sql(SELECT_SQL, query_args=[limit])
+        result = client.sql(query, query_args=args)
         return [dict(zip(TRANSACTION_COLUMNS, row)) for row in result]
+
+
+def fetch_transactions(limit: int = DEFAULT_FETCH_LIMIT) -> List[Dict[str, Any]]:
+    return _fetch_rows(limit=limit)
+
+
+def fetch_recent_transactions(limit: int = DEFAULT_FETCH_LIMIT) -> List[Dict[str, Any]]:
+    return _fetch_rows(limit=limit, order_by="step DESC")
+
+
+def fetch_training_frame(limit: int | None = None) -> List[Dict[str, Any]]:
+    """Fetch transactions for model training."""
+
+    return _fetch_rows(limit=limit, order_by="step")
 
 
 def fetch_transaction_by_id(tx_id: str) -> Optional[Dict[str, Any]]:
@@ -71,4 +103,15 @@ def fetch_transaction_by_id(tx_id: str) -> Optional[Dict[str, Any]]:
         result = client.sql(SELECT_BY_ID_SQL, query_args=[tx_id])
         rows = [dict(zip(TRANSACTION_COLUMNS, row)) for row in result]
         return rows[0] if rows else None
+
+
+def insert_alert(alert_row: Dict[str, Any]) -> str:
+    """Insert a fraud alert into the FraudAlerts table."""
+
+    alert_id = alert_row.get("alert_id")
+    with get_client() as client:
+        client.sql(
+            ALERT_INSERT_SQL, query_args=[alert_row[col] for col in FRAUD_ALERT_COLUMNS]
+        )
+    return str(alert_id)
 

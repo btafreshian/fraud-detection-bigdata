@@ -4,6 +4,8 @@ Stage 1 brings up local infrastructure for Apache Ignite and Kafka with a minima
 
 Stage 2 adds a lightweight Python client for loading and querying the Ignite Transactions table.
 
+Stage 3 trains a reusable sklearn pipeline from Ignite data and scores recent transactions.
+
 ## Prerequisites
 - Docker
 - Docker Compose
@@ -55,6 +57,56 @@ Example CLI entry points:
   ```bash
   python -c "from src.ignite_client import fetch_transactions; print(fetch_transactions(1))"
   ```
+
+### Stage 3: Train & Score
+
+Train a fraud model (requires Ignite to contain labeled transactions):
+
+```bash
+python -m src.train --max-rows 50000 --test-size 0.2 --random-state 42
+```
+
+Score recent transactions with the saved pipeline:
+
+```bash
+python -m src.score --limit 10
+```
+
+### Stage 4: Streaming demo
+
+1. Start Docker services (Ignite + Kafka):
+   ```bash
+   docker compose up -d
+   ```
+
+2. Load data and train the model if you haven't already:
+   ```bash
+   python -m src.load_csv_to_ignite --csv ./data/transactions.csv --limit 20000 --batch-size 1000
+   python -m src.train --max-rows 50000 --test-size 0.2 --random-state 42
+   ```
+
+3. Run the streaming consumer (loads `artifacts/model.joblib` and watches Kafka):
+   ```bash
+   python -m src.consume --threshold 0.7
+   ```
+
+4. In a separate terminal, publish transactions (synthetic by default):
+   ```bash
+   python -m src.produce --synthetic --limit 200 --sleep-ms 25
+   ```
+
+5. (Optional) Inspect alerts persisted to Ignite:
+   ```bash
+   docker compose exec ignite-node /opt/ignite/apache-ignite/bin/sqlline.sh \
+     -u jdbc:ignite:thin://127.0.0.1:10800 \
+     -e "SELECT * FROM FraudAlerts ORDER BY ts DESC LIMIT 5;"
+   ```
+
+6. (Optional) Watch alert messages on the Kafka topic from inside the Kafka container:
+   ```bash
+   docker compose exec kafka /opt/bitnami/kafka/bin/kafka-console-consumer.sh \
+     --bootstrap-server localhost:9092 --topic fraud_alerts --from-beginning
+   ```
 
 ## Verification
 
