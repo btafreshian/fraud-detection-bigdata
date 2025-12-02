@@ -21,5 +21,19 @@ TRANSACTION_COLUMNS: list[str] = [
     "isFlaggedFraud",
 ]
 
+FRAUD_ALERTS_TABLE: str = "FraudAlerts"
+FRAUD_ALERT_COLUMNS: list[str] = [
+    "alert_id",
+    "tx_id",
+    "ts",
+    "ml_prob",
+    "rule_hit",
+    "reason",
+    "amount",
+    "type",
+    "nameOrig",
+    "nameDest",
+]
+
 DEFAULT_FETCH_LIMIT: int = 5
 DEFAULT_BATCH_SIZE: int = 1000
