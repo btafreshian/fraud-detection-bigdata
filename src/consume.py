@@ -12,6 +12,9 @@ from uuid import uuid4
 import joblib
 import pandas as pd
 
+from kafka.errors import KafkaError, NoBrokersAvailable
+
+from .cli_utils import error_exit, format_exception, info
 from . import schema
 from .ignite_client import insert_alert, insert_transaction
 from .kafka_common import (
@@ -53,11 +56,10 @@ def parse_args() -> argparse.Namespace:
 
 def load_pipeline(model_path: Path) -> object:
     if not model_path.exists():
-        print(
+        error_exit(
             f"Model artifact not found at {model_path}. "
             "Run `python -m src.train` to train and save the pipeline before consuming."
         )
-        raise SystemExit(1)
     return joblib.load(model_path)
 
 
@@ -128,19 +130,24 @@ def main() -> None:
     bootstrap_server = get_bootstrap_server(args.bootstrap)
     pipeline = load_pipeline(MODEL_PATH)
 
-    consumer = build_consumer(
-        bootstrap_server,
-        args.group_id,
-        [TRANSACTIONS_TOPIC],
-        auto_offset_reset="earliest",
-    )
-    producer = build_producer(bootstrap_server)
+    try:
+        consumer = build_consumer(
+            bootstrap_server,
+            args.group_id,
+            [TRANSACTIONS_TOPIC],
+            auto_offset_reset="earliest",
+        )
+        producer = build_producer(bootstrap_server)
+    except (KafkaError, NoBrokersAvailable) as exc:  # pragma: no cover - network
+        error_exit(
+            f"Unable to connect to Kafka at {bootstrap_server}. Start the stack with `make up`."
+        )
 
-    print(
+    info(
         "Consuming transactions from topic "
         f"'{TRANSACTIONS_TOPIC}' with group '{args.group_id}' using {bootstrap_server}."
     )
-    print(f"Alerts will be published to topic '{ALERTS_TOPIC}'. Press Ctrl+C to exit.")
+    info(f"Alerts will be published to topic '{ALERTS_TOPIC}'. Press Ctrl+C to exit.")
 
     try:
         for message in consumer:
@@ -159,7 +166,11 @@ def main() -> None:
                 producer.flush()
                 print_alert(alert)
     except KeyboardInterrupt:
-        print("Stopping consumer...")
+        info("Stopping consumer...")
+    except ConnectionError as exc:  # pragma: no cover - ignite down
+        error_exit("Unable to reach Apache Ignite while consuming. Ensure it is running.")
+    except (KafkaError, NoBrokersAvailable) as exc:  # pragma: no cover - kafka down
+        error_exit(f"Kafka consumer error: {format_exception(exc)}")
     finally:
         consumer.close()
         producer.close()

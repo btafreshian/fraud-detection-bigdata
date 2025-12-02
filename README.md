@@ -1,170 +1,68 @@
 # fraud-ignite-kafka
 
-Stage 1 brings up local infrastructure for Apache Ignite and Kafka with a minimal schema for fraud detection experiments.
+Stages 1–5 set up Apache Ignite and Kafka, then train and deploy a lightweight
+fraud detection demo. Stage 6 adds quality-of-life tooling so the entire flow
+can be run end-to-end with a handful of commands.
 
-Stage 2 adds a lightweight Python client for loading and querying the Ignite Transactions table.
-
-Stage 3 trains a reusable sklearn pipeline from Ignite data and scores recent transactions.
-
-## Prerequisites
-- Docker
-- Docker Compose
-
-## Getting started
-1. Start the stack:
-   ```bash
-   docker compose up -d
-   ```
-
-2. (One-time) apply the Ignite SQL schema:
-   ```bash
-  docker compose exec ignite-node /opt/ignite/apache-ignite/bin/sqlline.sh \
-    -u jdbc:ignite:thin://127.0.0.1:10800 \
-    -f /opt/ignite/init/init.sql
-  ```
-
-## Python setup
-
-This repository targets Python 3.11+.
-
-1. Create and activate a virtual environment:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-### Stage 2 smoke test
-
-Ensure the Docker Compose stack and Ignite schema from Stage 1 are running, then run:
+## Demo in 5 commands
 
 ```bash
-python -m src.smoke_test
+make up
+make venv && make install
+make load CSV=./data/transactions.csv LIMIT=100000   # optional when you have PaySim
+make train                                            # requires labeled rows in Ignite
+make consume THRESH=0.7                               # terminal A
+make produce MODE=synthetic LIMIT=200 SLEEP_MS=25     # terminal B
 ```
 
-Example CLI entry points:
-
-- Load a CSV file into Ignite:
-  ```bash
-  python -m src.load_csv_to_ignite --csv ./data/transactions.csv --limit 10000 --batch-size 1000
-  ```
-
-- Fetch a small sample from Python:
-  ```bash
-  python -c "from src.ignite_client import fetch_transactions; print(fetch_transactions(1))"
-  ```
-
-### Stage 3: Train & Score
-
-Train a fraud model (requires Ignite to contain labeled transactions):
+After a few messages, run the hybrid report:
 
 ```bash
-python -m src.train --max-rows 50000 --test-size 0.2 --random-state 42
+make hybrid LIMIT=20
 ```
 
-Score recent transactions with the saved pipeline:
+Prefer a helper? `./scripts/demo.sh` echoes the steps above and sends a short
+synthetic burst (assumes the consumer is already running).
 
-```bash
-python -m src.score --limit 10
-```
+## Make targets
 
-### Stage 4: Streaming demo
+- `make up` / `make down` / `make reset` — manage the Docker Compose stack.
+- `make venv` / `make install` — create `.venv` and install Python deps.
+- `make smoke` — run a minimal Ignite CRUD test.
+- `make load CSV=... LIMIT=...` — ingest a PaySim-style CSV into Ignite.
+- `make train` — train and save `artifacts/model.joblib` once labeled data is loaded.
+- `make consume THRESH=0.7` — score the Kafka stream and emit alerts.
+- `make produce MODE=synthetic LIMIT=200 SLEEP_MS=25` — send transactions from synthetic data (or `MODE=csv CSV=...`).
+- `make hybrid LIMIT=20` — print the rule+ML risk report for suspicious rows.
+- `make test` — run the lightweight pytest suite.
 
-Use Kafka to stream transactions through the saved pipeline and generate alerts.
+## Environment & troubleshooting notes
 
-1. Start (or ensure) the Docker stack is running:
-   ```bash
-   docker compose up -d
-   ```
+- Ports: Ignite thin client `127.0.0.1:10800`; Kafka `9092`; Zookeeper `2181`.
+- Schema check: `docker compose exec ignite-node /opt/ignite/apache-ignite/bin/sqlline.sh -u jdbc:ignite:thin://127.0.0.1:10800 -f /opt/ignite/init/init.sql` (idempotent) and `!tables` inside the shell.
+- Verify alerts landed: `docker compose exec ignite-node /opt/ignite/apache-ignite/bin/sqlline.sh -u jdbc:ignite:thin://127.0.0.1:10800 -e "SELECT COUNT(*) FROM FraudAlerts;"`.
+- Kafka sanity: `docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list`.
+- If any CLI reports Ignite/Kafka unreachable, ensure `make up` succeeded and no other processes occupy the ports.
 
-2. Train the model if `artifacts/model.joblib` is missing:
-   ```bash
-   python -m src.train
-   ```
+## Python & training tips
 
-3. Start the consumer (loads the saved pipeline, writes to Ignite, emits alerts):
-   ```bash
-   python -m src.consume --threshold 0.7
-   ```
+- The project targets Python 3.11+. All entry points are runnable via
+  `python -m src.<module>` after `make install`.
+- Training requires labeled rows (`isFraud`) in Ignite. Load a CSV with labels
+  before calling `make train`; the CLI will abort if no labeled data is found.
+- Consumers, scorers, and the hybrid report exit early with clear messages when
+  the model artifact or infrastructure is missing.
 
-4. In another terminal, publish transactions (synthetic generator is the default fallback):
-   ```bash
-   python -m src.produce --synthetic --limit 200 --sleep-ms 25
-   ```
+## What files get generated
 
-5. (Optional) Watch alerts directly from Kafka inside the container:
-   ```bash
-   docker compose exec kafka /opt/bitnami/kafka/bin/kafka-console-consumer.sh \
-     --bootstrap-server localhost:9092 --topic fraud_alerts --from-beginning
-   ```
+- `artifacts/model.joblib` — saved sklearn pipeline after training.
+- `scripts/demo.sh` — helper to replay a short synthetic streaming run.
+- User-provided data such as `./data/transactions.csv` (not committed).
+- Docker volumes (`docker compose down -v` to reset) hold Ignite/Kafka state.
 
-6. Verify alerts landed in Ignite (via SQL shell):
-   ```bash
-   docker compose exec -it ignite-node /opt/ignite/apache-ignite/bin/sqlline.sh \
-     -u jdbc:ignite:thin://127.0.0.1:10800 \
-     -e "SELECT * FROM FraudAlerts LIMIT 5;"
-   ```
+## Hybrid report refresher
 
-### Stage 5: Hybrid report
-
-Produce an on-demand report that blends SQL rule hits with ML probabilities:
-
-```bash
-python -m src.hybrid --limit 20
-```
-
-The command fetches suspicious transactions directly from Ignite using the SQL
-rules (high amount or zero-balance transfers/cash-outs), scores them with the
-saved sklearn pipeline (`artifacts/model.joblib`), and prints a ranked table.
-Rows hitting any SQL rule are boosted to a minimum `final_risk` of 0.95, while
-purely ML-driven scores use the predicted fraud probability. Re-run after new
-training or data loads to see updated risk ordering.
-
-## Verification
-
-### Kafka
-- List existing topics (should succeed even if none exist):
-  ```bash
-  docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
-    --bootstrap-server localhost:9092 --list
-  ```
-- Create a test topic to confirm read/write paths:
-  ```bash
-  docker compose exec kafka /opt/bitnami/kafka/bin/kafka-topics.sh \
-    --create --topic test-fraud --partitions 1 --replication-factor 1 \
-    --bootstrap-server localhost:9092
-  ```
-
-### Apache Ignite
-- Open the SQL shell to inspect objects:
-  ```bash
-  docker compose exec -it ignite-node /opt/ignite/apache-ignite/bin/sqlline.sh \
-    -u jdbc:ignite:thin://127.0.0.1:10800
-  ```
-  From the shell, list the tables:
-  ```sql
-  !tables
-  ```
-
-- Run a quick query to confirm the schema is present:
-  ```bash
-  docker compose exec ignite-node /opt/ignite/apache-ignite/bin/sqlline.sh \
-    -u jdbc:ignite:thin://127.0.0.1:10800 \
-    -e "SELECT table_name FROM information_schema.tables WHERE table_schema = 'PUBLIC';"
-  ```
-
-## Troubleshooting
-- Port conflicts:
-  - Ignite thin client binds to `127.0.0.1:10800`.
-  - Kafka binds to `0.0.0.0:9092` with advertised listener `localhost:9092`.
-  - Zookeeper uses `2181`.
-  Stop any process occupying these ports before starting the stack.
-
-- Reset the stack (removes containers and volumes):
-  ```bash
-  docker compose down -v
-  ```
+`make hybrid LIMIT=20` fetches suspicious transactions (high amount or
+zero-balance transfers/cash-outs), scores them with the trained pipeline, boosts
+rule hits to a minimum `final_risk` of 0.95, and prints a ranked table. Re-run
+after new training or data loads to see updated ordering.

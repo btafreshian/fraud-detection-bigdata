@@ -10,6 +10,7 @@ import joblib
 import pandas as pd
 from tabulate import tabulate
 
+from .cli_utils import error_exit, info
 from .ignite_client import query_suspicious
 from .preprocess import FEATURE_COLS
 
@@ -42,8 +43,7 @@ def parse_args() -> argparse.Namespace:
 
 def _load_model() -> Any:
     if not MODEL_PATH.exists():
-        print("Saved model artifacts/model.joblib not found. Run python -m src.train first.")
-        raise SystemExit(1)
+        error_exit("Saved model artifacts/model.joblib not found. Run python -m src.train first.")
     return joblib.load(MODEL_PATH)
 
 
@@ -78,9 +78,12 @@ def main() -> None:
     args = parse_args()
     model = _load_model()
 
-    rows = query_suspicious(limit=args.limit, min_amount=args.min_amount)
+    try:
+        rows = query_suspicious(limit=args.limit, min_amount=args.min_amount)
+    except ConnectionError:
+        error_exit("Unable to reach Apache Ignite. Start the docker compose stack with `make up`.")
     if not rows:
-        print("No suspicious transactions found for the supplied criteria.")
+        info("No suspicious transactions found for the supplied criteria.")
         return
 
     df = pd.DataFrame(rows)

@@ -15,6 +15,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 
+from .cli_utils import error_exit, info
 from .ignite_client import fetch_training_frame
 from .preprocess import FEATURE_COLS, LABEL_COL, build_pipeline
 
@@ -43,24 +44,26 @@ def parse_args() -> argparse.Namespace:
 
 
 def _load_dataframe(limit: int | None) -> pd.DataFrame | None:
-    rows: List[dict] = fetch_training_frame(limit=limit)
+    try:
+        rows: List[dict] = fetch_training_frame(limit=limit)
+    except ConnectionError as exc:  # pragma: no cover - connection error
+        error_exit(
+            "Unable to reach Apache Ignite. Start the docker compose stack with `make up`."
+        )
     if not rows:
-        print(
+        error_exit(
             "No transactions available in Ignite. Load data with src.load_csv_to_ignite first."
         )
-        return None
 
     df = pd.DataFrame(rows)
     if LABEL_COL not in df.columns:
-        print(f"Label column '{LABEL_COL}' not found in fetched data.")
-        return None
+        error_exit(f"Label column '{LABEL_COL}' not found in fetched data.")
 
     df = df.dropna(subset=[LABEL_COL])
     if df.empty:
-        print(
+        error_exit(
             "No labeled transactions found (isFraud is null). Load labeled data before training."
         )
-        return None
 
     labels = pd.to_numeric(df[LABEL_COL], errors="coerce")
     valid_mask = labels.notna()
@@ -68,11 +71,10 @@ def _load_dataframe(limit: int | None) -> pd.DataFrame | None:
     df[LABEL_COL] = labels.loc[valid_mask].astype(int)
 
     if df[LABEL_COL].nunique() < 2:
-        print(
+        error_exit(
             "Training requires at least two label classes. "
             "Ensure the dataset includes both fraudulent and non-fraudulent rows."
         )
-        return None
 
     return df
 
@@ -100,7 +102,7 @@ def main() -> None:
     args = parse_args()
     df = _load_dataframe(limit=args.max_rows)
     if df is None:
-        return
+        error_exit("Training data could not be loaded.")
 
     X = df[FEATURE_COLS]
     y = df[LABEL_COL]
@@ -114,12 +116,10 @@ def main() -> None:
             stratify=y,
         )
     except ValueError as exc:
-        print(
+        error_exit(
             "Unable to split data for training/testing. "
             "Try reducing --test-size or ensuring both classes have enough samples."
         )
-        print(exc)
-        return
 
     pipeline = build_pipeline(random_state=args.random_state)
     pipeline.fit(X_train, y_train)
@@ -130,7 +130,7 @@ def main() -> None:
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     model_path = artifacts_dir / "model.joblib"
     joblib.dump(pipeline, model_path)
-    print(f"Saved trained pipeline to {model_path}")
+    info(f"Saved trained pipeline to {model_path}")
 
 
 if __name__ == "__main__":

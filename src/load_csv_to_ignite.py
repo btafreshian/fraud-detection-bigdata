@@ -9,6 +9,7 @@ from typing import Iterable, List
 from uuid import uuid4
 
 from .config import DEFAULT_BATCH_SIZE
+from .cli_utils import error_exit, format_exception, info
 from .ignite_client import insert_transactions
 from .schema import from_dict, to_row_dict
 
@@ -76,10 +77,18 @@ def main() -> None:
     args = parse_args()
     csv_path = Path(args.csv)
     if not csv_path.exists():
-        raise FileNotFoundError(f"CSV file not found: {csv_path}")
+        error_exit(f"CSV file not found: {csv_path}. Download or generate the dataset first.")
 
-    total = load_csv(csv_path=csv_path, limit=args.limit, batch_size=args.batch_size)
-    print(f"Finished loading {total} rows from {csv_path}")
+    try:
+        total = load_csv(csv_path=csv_path, limit=args.limit, batch_size=args.batch_size)
+    except ConnectionError as exc:  # pragma: no cover - network issue
+        error_exit(
+            "Unable to reach Apache Ignite while loading the CSV. "
+            "Ensure docker compose is running.")
+    except Exception as exc:  # pragma: no cover - unexpected failure
+        error_exit(f"Load failed: {format_exception(exc)}")
+
+    info(f"Finished loading {total} rows from {csv_path}")
 
 
 if __name__ == "__main__":
