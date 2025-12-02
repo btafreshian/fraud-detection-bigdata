@@ -1,9 +1,5 @@
 # fraud-ignite-kafka
 
-Stages 1–5 set up Apache Ignite and Kafka, then train and deploy a lightweight
-fraud detection demo. Stage 6 adds quality-of-life tooling so the entire flow
-can be run end-to-end with a handful of commands.
-
 ## Demo in 5 commands
 
 ```bash
