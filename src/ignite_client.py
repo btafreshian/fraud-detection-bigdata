@@ -30,6 +30,25 @@ SELECT_BY_ID_SQL = (
     f"SELECT {', '.join(TRANSACTION_COLUMNS)} FROM {TRANSACTIONS_TABLE} WHERE tx_id = ?"
 )
 
+SUSPICIOUS_COLUMNS = TRANSACTION_COLUMNS + ["rule_hit"]
+
+SUSPICIOUS_SQL = f"""
+SELECT
+    {', '.join(TRANSACTION_COLUMNS)},
+    CASE
+        WHEN amount > ?
+            OR (type = ? AND oldbalanceOrg = 0 AND newbalanceDest = 0)
+            OR (type = ? AND oldbalanceOrg = 0 AND newbalanceDest = 0)
+        THEN 1 ELSE 0
+    END AS rule_hit
+FROM {TRANSACTIONS_TABLE}
+WHERE amount > ?
+    OR (type = ? AND oldbalanceOrg = 0 AND newbalanceDest = 0)
+    OR (type = ? AND oldbalanceOrg = 0 AND newbalanceDest = 0)
+ORDER BY amount DESC
+LIMIT ?
+"""
+
 INSERT_ALERT_SQL = (
     f"INSERT INTO {FRAUD_ALERTS_TABLE} ("
     + ", ".join(FRAUD_ALERT_COLUMNS)
@@ -110,4 +129,22 @@ def fetch_transaction_by_id(tx_id: str) -> Optional[Dict[str, Any]]:
         result = client.sql(SELECT_BY_ID_SQL, query_args=[tx_id])
         rows = [dict(zip(TRANSACTION_COLUMNS, row)) for row in result]
         return rows[0] if rows else None
+
+
+def query_suspicious(limit: int, min_amount: float) -> List[Dict[str, Any]]:
+    """Return transactions that match the SQL rules for suspicious behavior."""
+
+    args: list[Any] = [
+        min_amount,
+        "TRANSFER",
+        "CASH_OUT",
+        min_amount,
+        "TRANSFER",
+        "CASH_OUT",
+        limit,
+    ]
+
+    with get_client() as client:
+        result = client.sql(SUSPICIOUS_SQL, query_args=args)
+        return [dict(zip(SUSPICIOUS_COLUMNS, row)) for row in result]
 
