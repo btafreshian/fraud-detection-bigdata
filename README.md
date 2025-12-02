@@ -2,6 +2,8 @@
 
 Stage 1 brings up local infrastructure for Apache Ignite and Kafka with a minimal schema for fraud detection experiments.
 
+Stage 2 adds a lightweight Python client for loading and querying the Ignite Transactions table.
+
 ## Prerequisites
 - Docker
 - Docker Compose
@@ -14,10 +16,45 @@ Stage 1 brings up local infrastructure for Apache Ignite and Kafka with a minima
 
 2. (One-time) apply the Ignite SQL schema:
    ```bash
-   docker compose exec ignite-node /opt/ignite/apache-ignite/bin/sqlline.sh \
-     -u jdbc:ignite:thin://127.0.0.1:10800 \
-     -f /opt/ignite/init/init.sql
+  docker compose exec ignite-node /opt/ignite/apache-ignite/bin/sqlline.sh \
+    -u jdbc:ignite:thin://127.0.0.1:10800 \
+    -f /opt/ignite/init/init.sql
+  ```
+
+## Python setup
+
+This repository targets Python 3.11+.
+
+1. Create and activate a virtual environment:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
    ```
+
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+### Stage 2 smoke test
+
+Ensure the Docker Compose stack and Ignite schema from Stage 1 are running, then run:
+
+```bash
+python -m src.smoke_test
+```
+
+Example CLI entry points:
+
+- Load a CSV file into Ignite:
+  ```bash
+  python -m src.load_csv_to_ignite --csv ./data/transactions.csv --limit 10000 --batch-size 1000
+  ```
+
+- Fetch a small sample from Python:
+  ```bash
+  python -c "from src.ignite_client import fetch_transactions; print(fetch_transactions(1))"
+  ```
 
 ## Verification
 
